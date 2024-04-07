@@ -1,8 +1,5 @@
 package com.ocado.basket;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -11,25 +8,21 @@ import java.util.*;
 
 public class BasketSplitter {
 
-    private final HashMap<String, List<String>> itemsDeliveryOptions;
+    private final Map<String, List<String>> itemsDeliveryOptions;
 
     public BasketSplitter(String absolutePathToConfigFile) throws IOException {
         Path path = Paths.get(absolutePathToConfigFile);
         String json = Files.readString(path);
 
-        ObjectMapper objectMapper = new ObjectMapper();
-        this.itemsDeliveryOptions = objectMapper.readValue(
-            json,
-            new TypeReference<HashMap<String, List<String>>>() {
-        });
+        this.itemsDeliveryOptions = JsonParser.parseObject(json);
     }
 
     public Map<String, List<String>> split(List<String> items) {
-        Map<String, List<String>> splitBasket = new HashMap<>();
-        HashMap<String, Set<String>> deliveryOptions = new HashMap<>();
-        HashMap<String, Integer> itemCounts = new HashMap<>();
+        Map<String, Set<String>> bestBasketSplit = new HashMap<>();
+        Map<String, Set<String>> deliveryOptions = new HashMap<>();
+        Map<String, Integer> itemCounts = new HashMap<>();
 
-        for (var item : items) {
+        for (String item : items) {
             addItemToDeliveryOptions(deliveryOptions, item);
 
             // in case a client has many items of the same type in the online basket
@@ -37,97 +30,42 @@ public class BasketSplitter {
         }
 
         List<String> deliveryOptionsNames = deliveryOptions.keySet().stream().toList();
-        Map<String, Set<String>> bestSplitBasket = new HashMap<>();
-        int largestDeliveryOption = 0;
+        int largestDeliverySize = 0;
+
         for (int i = 0; i < Math.pow(2, deliveryOptions.size()); ++i) {
-            Set<String> chosenDeliveryOptions = new HashSet<>();
+            Set<String> chosenDeliveryOptions = generateMaskBasedSubset(deliveryOptionsNames, i);
 
-            int tmp = i;
-            int j = 0;
-            while (tmp > 0) {
-                if (tmp % 2 == 1) {
-                    chosenDeliveryOptions.add(deliveryOptionsNames.get(j));
-                }
-                tmp /= 2;
-                ++j;
-            }
-
-            Set<String> itemsCopy = new HashSet<>(items);
-            for (String chosenDeliveryOption : chosenDeliveryOptions) {
-                itemsCopy.removeAll(deliveryOptions.get(chosenDeliveryOption));
-            }
-
-            if (itemsCopy.isEmpty()) {
-                String maxSizeDelivery = getLargestDeliveryOption(deliveryOptions, chosenDeliveryOptions);
-
-                if ((bestSplitBasket.isEmpty() || chosenDeliveryOptions.size() <= bestSplitBasket.size())
-                    && deliveryOptions.get(maxSizeDelivery).size() > largestDeliveryOption
+            if (checkSetCoverage(items, deliveryOptions, chosenDeliveryOptions)) {
+                NameValueTuple maxSizeDelivery = getLargestDeliveryOption(deliveryOptions, chosenDeliveryOptions, itemCounts);
+                if (   (bestBasketSplit.isEmpty() || chosenDeliveryOptions.size() < bestBasketSplit.size())
+                    || (chosenDeliveryOptions.size() == bestBasketSplit.size()
+                        && maxSizeDelivery.value() > largestDeliverySize)
                 ) {
-                    bestSplitBasket = new HashMap<>();
-                    bestSplitBasket.put(maxSizeDelivery, new HashSet<>(deliveryOptions.get(maxSizeDelivery)));
-                    Set<String> addedItems = new HashSet<>(bestSplitBasket.get(maxSizeDelivery));
-                    chosenDeliveryOptions.remove(maxSizeDelivery);
-
-                    for (String chosenDeliveryOption : chosenDeliveryOptions) {
-                        Set<String> reducedDeliveryOption = new HashSet<>(deliveryOptions.get(chosenDeliveryOption));
-                        reducedDeliveryOption.removeAll(addedItems);
-                        bestSplitBasket.put(chosenDeliveryOption, reducedDeliveryOption);
-                        addedItems.addAll(bestSplitBasket.get(chosenDeliveryOption));
-                    }
+                    bestBasketSplit = generateSplit(deliveryOptions, chosenDeliveryOptions, maxSizeDelivery.name());
+                    largestDeliverySize = maxSizeDelivery.value();
                 }
             }
         }
 
-        for (String deliveryOption : bestSplitBasket.keySet()) {
-            splitBasket.put(deliveryOption, bestSplitBasket.get(deliveryOption).stream().toList());
-        }
-
-        return splitBasket;
+        return includeItemRepetitionsSplit(bestBasketSplit, itemCounts);
     }
 
-//    public Map<String, List<String>> split(List<String> items) {
-//        Map<String, List<String>> splitBasket = new HashMap<>();
-//        HashMap<String, Set<String>> deliveryOptions = new HashMap<>();
-//        HashMap<String, Integer> itemCounts = new HashMap<>();
-//
-//        for (var item : items) {
-//            addItemToDeliveryOptions(deliveryOptions, item);
-//
-//            // in case a client has many items of the same type in the online basket
-//            increaseItemCount(itemCounts, item);
-//        }
-//
-//        for (int i = deliveryOptions.size(); i > 0; --i) {
-//            String largestDeliveryOption = getLargestDeliveryOption(deliveryOptions);
-//
-//            // if all items have already been assigned there is no point in further calculations
-//            if (deliveryOptions.get(largestDeliveryOption).isEmpty()) {
-//                break;
-//            }
-//
-//            List<String> deliveryOptionItems = new ArrayList<>(deliveryOptions.get(largestDeliveryOption).size());
-//            for (String item : deliveryOptions.get(largestDeliveryOption)) {
-//                for (int j = 0; j < itemCounts.get(item); ++i) {
-//                    deliveryOptionItems.add(item);
-//                }
-//            }
-//            splitBasket.put(largestDeliveryOption, deliveryOptionItems);
-//
-//            removeAssignedItems(deliveryOptions, largestDeliveryOption);
-//        }
-//
-//        return splitBasket;
-//    }
 
-    protected void increaseItemCount(HashMap<String, Integer> itemCounts, String item) {
+    protected void increaseItemCount(
+        Map<String, Integer> itemCounts,
+        String item
+    ) {
         if (!itemCounts.containsKey(item)) {
             itemCounts.put(item, 0);
         }
         itemCounts.replace(item, itemCounts.get(item) + 1);
     }
 
-    protected void addItemToDeliveryOptions(HashMap<String, Set<String>> deliveryOptions, String item) {
-        for (var deliveryOption : this.itemsDeliveryOptions.get(item)) {
+    protected void addItemToDeliveryOptions(
+        Map<String, Set<String>> deliveryOptions,
+        String item
+    ) {
+        for (String deliveryOption : this.itemsDeliveryOptions.get(item)) {
             if (!deliveryOptions.containsKey(deliveryOption)) {
                 deliveryOptions.put(deliveryOption, new HashSet<>());
             }
@@ -135,33 +73,107 @@ public class BasketSplitter {
         }
     }
 
-    protected String getLargestDeliveryOption(HashMap<String, Set<String>> deliveryOptions, Set<String> chosenDeliveryOptions) {
+    protected Set<String> generateMaskBasedSubset(
+        List<String> originalList,
+        int mask
+    ) {
+        Set<String> subset = new HashSet<>();
+        int j = 0;
+
+        while (mask > 0) {
+            if (mask % 2 == 1) {
+                subset.add(originalList.get(j));
+            }
+
+            mask /= 2;
+            ++j;
+        }
+
+        return subset;
+    }
+
+    protected boolean checkSetCoverage(
+        Collection<String> set,
+        Map<String, Set<String>> subsets,
+        Collection<String> chosenSubsets
+    ) {
+        Set<String> setCopy = new HashSet<>(set);
+
+        for (String subset : chosenSubsets) {
+            setCopy.removeAll(subsets.get(subset));
+        }
+
+        return setCopy.isEmpty();
+    }
+
+    protected NameValueTuple getLargestDeliveryOption(
+        Map<String, Set<String>> deliveryOptions,
+        Set<String> chosenDeliveryOptions,
+        Map<String, Integer> itemCounts
+    ) {
         String largestDeliveryOption = null;
+        int largestDeliverySize = 0;
+
         for (String deliveryOption : chosenDeliveryOptions) {
-            if (largestDeliveryOption == null || deliveryOptions.get(deliveryOption).size() > deliveryOptions.get(largestDeliveryOption).size()) {
+            int currentDeliverySize = 0;
+            for (String item : deliveryOptions.get(deliveryOption)) {
+                currentDeliverySize += itemCounts.get(item);
+            }
+
+            if (largestDeliveryOption == null || currentDeliverySize > largestDeliverySize) {
                 largestDeliveryOption = deliveryOption;
+                largestDeliverySize = currentDeliverySize;
             }
         }
 
-        return largestDeliveryOption;
+        return new NameValueTuple(largestDeliveryOption, largestDeliverySize);
     }
 
-    protected void removeAssignedItems(HashMap<String, Set<String>> deliveryOptions, String largestDeliveryOption) {
-        Set<String> largestDelivery = deliveryOptions.remove(largestDeliveryOption);
-        for (String deliveryOption : deliveryOptions.keySet()) {
-            deliveryOptions.get(deliveryOption).removeAll(largestDelivery);
+    protected Map<String, Set<String>> generateSplit(
+        Map<String, Set<String>> deliveryOptions,
+        Set<String> chosenDeliveryOptions,
+        String maxSizeDelivery
+    ) {
+        Map<String, Set<String>> bestSplitBasket = new HashMap<>();
+        bestSplitBasket.put(maxSizeDelivery, new HashSet<>(deliveryOptions.get(maxSizeDelivery)));
+        Set<String> addedItems = new HashSet<>(bestSplitBasket.get(maxSizeDelivery));
+        chosenDeliveryOptions.remove(maxSizeDelivery);
+
+        for (String chosenDeliveryOption : chosenDeliveryOptions) {
+            Set<String> reducedDeliveryOption = new HashSet<>(deliveryOptions.get(chosenDeliveryOption));
+            reducedDeliveryOption.removeAll(addedItems);
+
+            if (reducedDeliveryOption.isEmpty()) {
+                break;
+            }
+
+            bestSplitBasket.put(chosenDeliveryOption, reducedDeliveryOption);
+            addedItems.addAll(bestSplitBasket.get(chosenDeliveryOption));
         }
+
+        return bestSplitBasket;
+    }
+
+    protected Map<String, List<String>> includeItemRepetitionsSplit(
+        Map<String, Set<String>> originalSplit,
+        Map<String, Integer> itemCounts
+    ) {
+        Map<String, List<String>> split = new HashMap<>();
+
+        for (String deliveryOption : originalSplit.keySet()) {
+            split.put(deliveryOption, new ArrayList<>());
+
+            for (String item : originalSplit.get(deliveryOption)) {
+                for (int i = 0; i < itemCounts.get(item); ++i) {
+                    split.get(deliveryOption).add(item);
+                }
+            }
+        }
+
+        return split;
     }
 
 }
-
-
-
-
-
-
-
-
 
 
 

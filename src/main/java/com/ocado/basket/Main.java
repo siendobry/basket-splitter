@@ -19,8 +19,7 @@ public class Main {
         String clientBasketAbsolutePath = "C:\\Stuff\\InterviewTasks\\basket-splitter\\src\\main\\resources\\basket-1.json";
         Path path = Paths.get(clientBasketAbsolutePath);
         String json = Files.readString(path);
-        ObjectMapper objectMapper = new ObjectMapper();
-        List<String> clientBasket = objectMapper.readValue(json, new TypeReference<List<String>>() {});
+        List<String> clientBasket = JsonParser.parseList(json);
 
         Map<String, List<String>> result = splitter.split(clientBasket);
         for (String deliveryOption : result.keySet()) {

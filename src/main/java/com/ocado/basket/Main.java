@@ -13,10 +13,10 @@ import java.util.Map;
 
 public class Main {
     public static void main(String[] args) throws IOException {
-        String configAbsolutePath = "D:\\Pobrane\\Zadanie\\Zadanie\\config.json";
+        String configAbsolutePath = "C:\\Stuff\\InterviewTasks\\basket-splitter\\src\\main\\resources\\config.json";
         BasketSplitter splitter = new BasketSplitter(configAbsolutePath);
 
-        String clientBasketAbsolutePath = "D:\\Pobrane\\Zadanie\\Zadanie\\basket-2.json";
+        String clientBasketAbsolutePath = "C:\\Stuff\\InterviewTasks\\basket-splitter\\src\\main\\resources\\basket-1.json";
         Path path = Paths.get(clientBasketAbsolutePath);
         String json = Files.readString(path);
         ObjectMapper objectMapper = new ObjectMapper();
